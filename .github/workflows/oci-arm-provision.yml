@@ -82,7 +82,13 @@ jobs:
           printf '%s\n' "${OCI_KEY}" > ~/.oci/oci_api_key.pem
           printf '%s\n' "${SSH_KEY}" > ~/.ssh/oci_instance_key
           chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem ~/.ssh/oci_instance_key
-          oci iam compartment list --all --query 'data[0].name' --raw-output 2>&1 || true
+          echo "=== DIAGNOSTICA OCI ==="
+          echo "--- region-subscription ---"
+          oci iam region-subscription list --all 2>&1 | head -5 || true
+          echo "--- availability-domain list (senza --region) ---"
+          oci iam availability-domain list --compartment-id "${OCI_TENANCY}" 2>&1 | head -10 || true
+          echo "--- availability-domain list (--region eu-frankfurt-1) ---"
+          oci iam availability-domain list --compartment-id "${OCI_TENANCY}" --region eu-frankfurt-1 2>&1 | head -10 || true
 
       - name: Scoperta regioni e subnet pubbliche
         id: discovery
