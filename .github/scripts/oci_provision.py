@@ -8,7 +8,11 @@ import time
 import uuid
 from pathlib import Path
 
-COMPARTMENT_ID = os.environ["COMPARTMENT_ID"]
+COMPARTMENT_ID = os.environ.get("COMPARTMENT_ID", "").strip()
+# Le availability domain appartengono al tenancy (root compartment):
+# elencarle col root evita NotAuthorizedOrNotFound quando il secret
+# OCI_COMPARTMENT_ID punta a un compartment diverso dal root.
+TENANCY_ID = os.environ.get("OCI_TENANCY_ID", "").strip() or COMPARTMENT_ID
 SSH_PUBLIC_KEY = os.environ["SSH_PUB"]
 CANDIDATES = [item for item in os.environ.get("REGION_CANDIDATES", "").split("|") if "::" in item]
 OUTPUT = Path(os.environ["GITHUB_OUTPUT"])
@@ -260,7 +264,7 @@ def launch_in_region(region: str, subnet_id: str) -> tuple[str, str]:
     try:
         ads = oci_json([
             "iam", "availability-domain", "list",
-            "--compartment-id", COMPARTMENT_ID,
+            "--compartment-id", TENANCY_ID,
             "--region", region,
         ]).get("data", [])
         images = oci_json([
