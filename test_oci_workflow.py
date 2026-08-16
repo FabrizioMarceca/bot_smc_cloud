@@ -23,7 +23,7 @@ class OciWorkflowQueryTests(unittest.TestCase):
     def test_launch_timeout_is_fail_safe(self) -> None:
         self.assertIn("except subprocess.TimeoutExpired as exc:", SCRIPT)
         self.assertIn("verifico se OCI ha creato l'istanza", SCRIPT)
-        self.assertIn("interrompo senza altri tentativi", SCRIPT)
+        self.assertIn("passo alla regione successiva", SCRIPT)
         self.assertIn("interrompo per evitare duplicati", SCRIPT)
         self.assertIn("find_instance_by_launch_token", SCRIPT)
         self.assertIn("def wait_for_launch_instance", SCRIPT)

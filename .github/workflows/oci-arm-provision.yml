@@ -264,7 +264,7 @@ jobs:
           OCI_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}
           SSH_PUB: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
           REGION_CANDIDATES: ${{ steps.discovery.outputs.region_candidates }}
-          PROVISION_DEADLINE_SECONDS: '330'
+          PROVISION_DEADLINE_SECONDS: '500'
         run: |
           set -euo pipefail
           python .github/scripts/oci_provision.py

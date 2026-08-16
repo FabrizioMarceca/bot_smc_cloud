@@ -359,9 +359,9 @@ def launch_in_region(region: str, subnet_id: str) -> tuple[str, str]:
                     sys.exit(2)
                 print(
                     f"[{region}] esito launch non determinabile: nessuna istanza "
-                    "con token del run; interrompo senza altri tentativi"
+                    "con token del run; passo alla regione successiva"
                 )
-                sys.exit(2)
+                continue
 
             except Exception as exc:
                 message = str(exc)
