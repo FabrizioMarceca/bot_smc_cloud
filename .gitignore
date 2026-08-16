@@ -1,0 +1,16 @@
+.env
+*.log
+*.log.*
+__pycache__/
+venv/
+*.pyc
+equity_history.json
+access.log
+bot_output.log
+*.pid
+.env.bak*
+bot_log*.txt
+.idea/
+ngrok.exe
+.freebuff/
+documentazione_strategia/

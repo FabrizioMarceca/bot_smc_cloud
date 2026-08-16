@@ -1,0 +1,29 @@
+# =============================================================================
+# .gitattributes - Line endings deterministiche per il repo bot_smc_cloud
+# =============================================================================
+# Obiettivo: gli script eseguiti su Linux (deploy.sh, workflow YAML, Python)
+# DEVONO avere terminazioni LF anche se l'autore lavora su Windows.
+# I file .bat (cmd.exe) richiedono CRLF.
+# =============================================================================
+
+# Script e sorgenti: sempre LF (qualsiasi checkout OS)
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.py       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+*.txt      text eol=lf
+*.json     text eol=lf
+*.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# File Windows: CRLF (cmd.exe ne ha bisogno)
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+
+# Binari
+*.png      binary
+*.jpg      binary
+*.pdf      binary
+*.exe      binary

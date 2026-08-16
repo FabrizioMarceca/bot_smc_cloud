@@ -1,0 +1,24 @@
+# Dipendenze del bot SMC
+# Installare con: pip install -r requirements.txt
+#
+# ⚠️ NOTA IMPORTANTE: il pacchetto "MetaTrader5" su PyPI ha SOLO wheel
+#    Windows (win_amd64). Non esistono wheel Linux (né x86_64 né ARM64).
+#
+# Uso previsto:
+#   1) PC Windows locale (avvia_tutto.bat) -> pip install -r requirements.txt
+#      funziona normalmente.
+#   2) Istanza OCI A1.Flex (ARM64) -> il workflow di deploy installa:
+#        - Hangover (Wine fork per ARM64, .deb da github.com/AndreRH/hangover)
+#        - terminale MetaTrader 5 (mt5setup.exe /auto dentro Wine)
+#        - Python Windows 3.11 dentro Wine (C:\Python311)
+#      e poi esegue questo stesso requirements.txt con quel Python Windows:
+#        wine C:/Python311/python.exe -m pip install -r requirements.txt
+#
+# Quindi: NON aggiungere qui pacchetti Linux-only; il file deve restare
+# compatibile sia con Windows nativo sia con Windows-emulato in Wine.
+MetaTrader5
+pandas
+numpy
+flask
+requests
+python-dotenv

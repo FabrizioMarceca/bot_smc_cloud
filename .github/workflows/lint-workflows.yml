@@ -1,0 +1,54 @@
+# =============================================================================
+# Lint dei workflow GitHub Actions
+# =============================================================================
+# Esegue actionlint (static checker ufficiale per i workflow GitHub Actions)
+# su TUTTI i file in .github/workflows/. Detecta:
+#   - errori di sintassi YAML/struttura (chiavi mancanti/inesatte)
+#   - errori di tipo nelle espressioni ${{ }}
+#   - input/output errati delle action usate
+#   - errori nei filtri glob, nelle espressioni cron e in needs: 
+#   - problemi di sicurezza (script injection, credenziali hardcoded)
+# Inoltre actionlint integra shellcheck sugli script dei blocchi run:,
+# rilevando bug di bash (quoting, variabili non quotate, ecc.).
+#
+# shellcheck e' preinstallato sui runner ubuntu-latest: actionlint lo
+# rileva automaticamente e lo applica agli script run: di ogni step.
+# =============================================================================
+
+name: Lint GitHub Actions workflows
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Download script ufficiale raccomandato dalla doc di actionlint
+      # (https://github.com/rhysd/actionlint). Espone il percorso
+      # dell'eseguibile in steps.get_actionlint.outputs.executable.
+      - name: Download actionlint
+        id: get_actionlint
+        run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+        shell: bash
+
+      - name: Check workflow files
+        run: ${{ steps.get_actionlint.outputs.executable }} -color
+        shell: bash
+
+      # shellcheck sugli script bash del repo (deploy.sh): lo stesso check
+      # che actionlint fa sugli script run: dei workflow, esteso anche al
+      # deploy script usato nei job di deploy.
+      - name: Shellcheck bash scripts
+        run: shellcheck -S warning deploy.sh
+        shell: bash

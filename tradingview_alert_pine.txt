@@ -1,0 +1,53 @@
+// ===========================================================================
+//  PINE SCRIPT SMC — Alert TradingView per run_master.py
+//
+//  Questo script ti permette di inviare MANUALMENTE un trade dal grafico
+//  TradingView al bot. I valori entry/sl/tp sono DINAMICI: li imposti tu
+//  direttamente sul grafico con le linee orizzontali.
+//
+//  COME USARLO (per inviare un trade manuale):
+//    1. Aggiungi questo script al grafico XAUUSD su TradingView
+//    2. Disegna 2 linee orizzontali sul grafico:
+//       - Una linea al tuo entry level
+//       - Una linea al tuo stop loss
+//    3. Crea un Alert (campanella) con:
+//       - Condition: "SMC Bot Signal"
+//       - Webhook URL: https://TUA_URL_NGROK/webhook
+//       - Message: {{strategy.order.alert_message}}
+//    4. Il bot NON esegue trade automatici da TradingView.
+//       Per il trading automatico SMC, il bot usa l'analisi interna
+//       (structure_analyzer.py) che gira in autonomia ogni 2 secondi.
+//
+//  IMPORTANTE: Questo NON sostituisce l'analisi SMC autonoma del bot.
+//  Il bot analizza il mercato in automatico con logica SMC completa:
+//  swing detection -> HH/HL/LL/LH -> BOS/MSS/TC -> Order Blocks ->
+//  PD matrix -> liquidity sweeps -> segnali dinamici -> ordini MT5.
+// ===========================================================================
+
+//@version=5
+indicator("SMC Bot Signal — Manual Trigger", overlay=true)
+
+// === CONFIGURAZIONE (MODIFICA QUI) ===
+// IMPORTANTE: imposta TOKEN = al valore di WEBHOOK_SECRET_TOKEN del tuo .env.
+// Se non coincidono, il bot rifiuta il segnale con 401 Unauthorized.
+TOKEN  = "INCOLLA_QUI_IL_TUO_WEBHOOK_SECRET_TOKEN"
+SYMBOL = "XAUUSD"
+
+// === INPUT: entry e stop loss (li imposti dalle proprietà dell'indicatore) ===
+entryPrice = input.float(defval=0.0, title="Entry Price (0 = nessun trade)")
+stopLoss   = input.float(defval=0.0, title="Stop Loss")
+tradeSide  = input.string(defval="none", title="Direction",
+                          options=["none", "buy", "sell"])
+
+// === Invia alert SOLO se entry > 0 e direction != "none" ===
+// Il webhook valida anche il R:R minimo (1:3 pro-trend, 1:2 counter-trend):
+// se non arriva tp1/tp2 il bot li calcola dal rischio in automatico.
+if barstate.islastconfirmedhistory and entryPrice > 0 and tradeSide != "none"
+    msg = '{"token":"' + TOKEN + '",' +
+          '"symbol":"' + SYMBOL + '",' +
+          '"side":"' + tradeSide + '",' +
+          '"entry":' + str.tostring(entryPrice) + ',' +
+          '"sl":' + str.tostring(stopLoss) + ',' +
+          '"setup_type":"pro_trend"}'
+
+    alert(msg, alert.freq_once_per_bar_close)

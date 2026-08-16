@@ -1,0 +1,387 @@
+# =============================================================================
+# OCI ARM Host Capacity - provisioning automatico multi-regione
+# =============================================================================
+# Prova solo regioni gia' sottoscritte e subnet pubbliche gia' esistenti.
+# Non cambia la Home Region, non sottoscrive nuove regioni e non fa upgrade PAYG.
+# La Home Region viene preferita per compatibilita' con Always Free ARM.
+# =============================================================================
+
+name: OCI ARM Host Capacity
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-arm-provision-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+
+jobs:
+  provision:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      public_ip: ${{ steps.provision.outputs.public_ip }}
+      selected_region: ${{ steps.provision.outputs.selected_region }}
+      selected_subnet: ${{ steps.provision.outputs.selected_subnet }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup OCI CLI
+        run: |
+          set -euxo pipefail
+          python --version
+          python -m venv "$RUNNER_TEMP/oci-venv"
+          "$RUNNER_TEMP/oci-venv/bin/python" -m pip install --upgrade --quiet pip
+          "$RUNNER_TEMP/oci-venv/bin/python" -m pip install --quiet oci-cli
+          echo "$RUNNER_TEMP/oci-venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/oci-venv/bin/oci" --version
+
+      - name: Configura OCI e SSH
+        env:
+          OCI_USER: ${{ secrets.OCI_USER_ID }}
+          OCI_FP: ${{ secrets.OCI_KEY_FINGERPRINT }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY_ID }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          SSH_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.oci ~/.ssh
+          {
+            echo "[DEFAULT]"
+            echo "user=${OCI_USER}"
+            echo "fingerprint=${OCI_FP}"
+            echo "tenancy=${OCI_TENANCY}"
+            echo "region=${OCI_REGION}"
+            echo "key_file=${HOME}/.oci/oci_api_key.pem"
+          } > ~/.oci/config
+          printf '%s\n' "${OCI_KEY}" > ~/.oci/oci_api_key.pem
+          printf '%s\n' "${SSH_KEY}" > ~/.ssh/oci_instance_key
+          chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem ~/.ssh/oci_instance_key
+          oci iam compartment list --all --query 'data[0].name' --raw-output 2>&1 || true
+
+      - name: Scoperta regioni e subnet pubbliche
+        id: discovery
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY_ID }}
+          COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+          PREFERRED_REGION: ${{ secrets.OCI_REGION }}
+          PREFERRED_SUBNET: ${{ secrets.OCI_SUBNET_ID }}
+        run: |
+          set -euo pipefail
+          python - << 'PYEOF'
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+
+          tenancy = os.environ["OCI_TENANCY"]
+          compartment = os.environ["COMPARTMENT_ID"]
+          preferred_region = os.environ.get("PREFERRED_REGION", "").strip()
+          preferred_subnet = os.environ.get("PREFERRED_SUBNET", "").strip()
+
+          DISCOVERY_DEADLINE = 90
+          discovery_started = time.monotonic()
+
+          def oci_json(args: list[str], timeout: int = 25) -> dict:
+              remaining = DISCOVERY_DEADLINE - (time.monotonic() - discovery_started)
+              if remaining <= 0:
+                  raise TimeoutError("discovery regioni oltre 90 secondi")
+              result = subprocess.run(
+                  ["oci", *args, "--output", "json"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+                  timeout=min(timeout, max(1, int(remaining))),
+              )
+              return json.loads(result.stdout or "{}")
+
+          def has_internet_route(subnet: dict, region: str) -> bool:
+              route_table_id = subnet.get("route-table-id")
+              if not route_table_id:
+                  return False
+              try:
+                  gateways = oci_json([
+                      "network", "internet-gateway", "list",
+                      "--compartment-id", compartment,
+                      "--region", region,
+                      "--all",
+                  ]).get("data", [])
+                  gateway_ids = {
+                      str(item.get("id")) for item in gateways
+                      if item.get("id") and item.get("is-enabled", True)
+                  }
+                  rules = oci_json([
+                      "network", "route-table", "get",
+                      "--rt-id", route_table_id,
+                      "--region", region,
+                  ]).get("data", {}).get("route-rules", [])
+                  return any(
+                      rule.get("destination") == "0.0.0.0/0"
+                      and str(rule.get("network-entity-id")) in gateway_ids
+                      for rule in rules
+                  )
+              except Exception:
+                  return False
+
+          subscriptions = oci_json([
+              "iam", "region-subscription", "list",
+              "--tenancy-id", tenancy, "--all",
+          ]).get("data", [])
+
+          ready = []
+          for item in subscriptions:
+              name = str(item.get("region-name", "")).strip()
+              if name and str(item.get("status", "")).upper() == "READY":
+                  ready.append({
+                      "name": name,
+                      "home": bool(item.get("is-home-region", False)),
+                  })
+
+          preferred_order = [
+              "eu-frankfurt-1",
+              preferred_region,
+              "eu-madrid-1", "eu-amsterdam-1",
+              "uk-london-1", "eu-paris-1", "eu-marseille-1",
+              "eu-milan-1",
+          ]
+          rank = {name: index for index, name in enumerate(x for x in preferred_order if x)}
+          ready.sort(key=lambda item: (
+              0 if item["name"] == "eu-frankfurt-1" else 1,
+              0 if item["home"] else 1,
+              rank.get(item["name"], 999),
+              item["name"],
+          ))
+
+          candidates = []
+          for item in ready:
+              region = item["name"]
+              subnet_ids = []
+
+              if region == preferred_region and preferred_subnet:
+                  try:
+                      subnet = oci_json([
+                          "network", "subnet", "get",
+                          "--subnet-id", preferred_subnet,
+                          "--region", region,
+                      ]).get("data", {})
+                      if (
+                          subnet.get("id") == preferred_subnet
+                          and subnet.get("lifecycle-state") == "AVAILABLE"
+                          and not subnet.get("prohibit-public-ip-on-vnic", True)
+                          and has_internet_route(subnet, region)
+                      ):
+                          subnet_ids.append(preferred_subnet)
+                  except Exception as exc:
+                      message = str(exc).lower()
+                      if any(token in message for token in ("notauthorized", "not authorized", "invalidparameter", "invalid parameter", "limitexceeded", "serviceerror")):
+                          raise
+
+              if not subnet_ids:
+                  try:
+                      subnets = oci_json([
+                          "network", "subnet", "list",
+                          "--compartment-id", compartment,
+                          "--region", region,
+                          "--all",
+                      ]).get("data", [])
+                      subnet_ids = [
+                          str(subnet["id"])
+                          for subnet in subnets
+                          if subnet.get("id")
+                          and subnet.get("lifecycle-state") == "AVAILABLE"
+                          and not subnet.get("prohibit-public-ip-on-vnic", True)
+                          and has_internet_route(subnet, region)
+                      ]
+                  except Exception as exc:
+                      message = str(exc).lower()
+                      if any(token in message for token in ("notauthorized", "not authorized", "invalidparameter", "invalid parameter", "limitexceeded", "serviceerror", "timeout")):
+                          raise
+                      print(f"Subnet non leggibili in {region}: {exc}")
+
+              for subnet_id in subnet_ids:
+                  candidates.append(f"{region}::{subnet_id}")
+
+          if not candidates:
+              print("ERRORE: nessuna regione READY con subnet pubblica disponibile")
+              print("Regioni analizzate:", ", ".join(x["name"] for x in ready) or "nessuna")
+              sys.exit(1)
+
+          print("Candidati ordinati:", " | ".join(candidates))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"region_candidates={'|'.join(candidates)}\n")
+          PYEOF
+
+      - name: Provision ARM multi-regione
+        id: provision
+        env:
+          COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+          SSH_PUB: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          REGION_CANDIDATES: ${{ steps.discovery.outputs.region_candidates }}
+          PROVISION_DEADLINE_SECONDS: '330'
+        run: |
+          set -euo pipefail
+          python .github/scripts/oci_provision.py
+
+  deploy:
+    needs: provision
+    if: needs.provision.outputs.public_ip != ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup OCI CLI
+        run: |
+          set -euxo pipefail
+          python -m venv "$RUNNER_TEMP/oci-venv"
+          "$RUNNER_TEMP/oci-venv/bin/python" -m pip install --upgrade --quiet pip
+          "$RUNNER_TEMP/oci-venv/bin/python" -m pip install --quiet oci-cli
+          echo "$RUNNER_TEMP/oci-venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/oci-venv/bin/oci" --version
+
+      - name: Configura OCI e SSH
+        env:
+          OCI_USER: ${{ secrets.OCI_USER_ID }}
+          OCI_FP: ${{ secrets.OCI_KEY_FINGERPRINT }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY_ID }}
+          OCI_REGION: ${{ needs.provision.outputs.selected_region }}
+          OCI_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          SSH_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.oci ~/.ssh
+          {
+            echo "[DEFAULT]"
+            echo "user=${OCI_USER}"
+            echo "fingerprint=${OCI_FP}"
+            echo "tenancy=${OCI_TENANCY}"
+            echo "region=${OCI_REGION}"
+            echo "key_file=${HOME}/.oci/oci_api_key.pem"
+          } > ~/.oci/config
+          printf '%s\n' "${OCI_KEY}" > ~/.oci/oci_api_key.pem
+          printf '%s\n' "${SSH_KEY}" > ~/.ssh/oci_instance_key
+          chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem ~/.ssh/oci_instance_key
+
+      - name: Deploy bot su istanza
+        env:
+          BOT_REPO_URL: ${{ secrets.BOT_REPO_URL }}
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WEBHOOK_SECRET_TOKEN: ${{ secrets.WEBHOOK_SECRET_TOKEN }}
+          VNC_PASSWORD: ${{ secrets.VNC_PASSWORD || 'changeme' }}
+        run: |
+          set -euo pipefail
+          IP="${{ needs.provision.outputs.public_ip }}"
+          echo "Deploy su $IP (regione ${{ needs.provision.outputs.selected_region }}) ..."
+
+          SSH_OK=0
+          for _ in $(seq 1 30); do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+              -i ~/.ssh/oci_instance_key "ubuntu@$IP" "echo ok" 2>/dev/null; then
+              SSH_OK=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$SSH_OK" != "1" ]; then
+            echo "ERRORE: SSH non raggiungibile dopo 150 secondi"
+            exit 1
+          fi
+
+          REPO_B64=$(printf '%s' "$BOT_REPO_URL" | base64 -w0)
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/oci_instance_key "ubuntu@$IP" \
+            "REPO_B64='$REPO_B64'; REPO_URL=\$(printf '%s' \"\$REPO_B64\" | base64 -d); if [ ! -d ~/bot_smc ]; then git clone \"\$REPO_URL\" ~/bot_smc; else cd ~/bot_smc && git pull; fi"
+
+          trap 'rm -f .deploy-input.env' EXIT
+          python - << 'PYEOF'
+          import os
+          from pathlib import Path
+          keys = (
+              "MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER", "TELEGRAM_BOT_TOKEN",
+              "TELEGRAM_CHAT_ID", "WEBHOOK_SECRET_TOKEN", "VNC_PASSWORD",
+          )
+          Path(".deploy-input.env").write_text(
+              "".join(f"{key}={os.environ.get(key, '')}\n" for key in keys if os.environ.get(key, "")),
+              encoding="utf-8",
+          )
+          Path(".deploy-input.env").chmod(0o600)
+          PYEOF
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/oci_instance_key \
+            .deploy-input.env "ubuntu@$IP:~/bot_smc/.deploy-input.env"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/oci_instance_key \
+            deploy.sh "ubuntu@$IP:~/bot_smc/deploy.sh"
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/oci_instance_key "ubuntu@$IP" \
+            "cd ~/bot_smc && chmod 600 .deploy-input.env && trap 'rm -f .deploy-input.env' EXIT && bash deploy.sh"
+
+      - name: Cleanup secret temporaneo remoto
+        if: always()
+        run: |
+          IP="${{ needs.provision.outputs.public_ip }}"
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i ~/.ssh/oci_instance_key "ubuntu@$IP" \
+            "rm -f ~/bot_smc/.deploy-input.env" 2>/dev/null || true
+
+      - name: Notifica Telegram
+        if: success()
+        run: |
+          TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          CHAT_ID="${{ secrets.TELEGRAM_CHAT_ID }}"
+          IP="${{ needs.provision.outputs.public_ip }}"
+          if [ -n "$TOKEN" ] && [ -n "$CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d "chat_id=${CHAT_ID}" \
+              -d "text=OCI ARM ONLINE%0AIP: ${IP}%0A$(date -u '+%H:%M UTC')" >/dev/null
+          fi
+
+  keepalive:
+    needs: provision
+    if: always() && needs.provision.outputs.public_ip == ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Keepalive istanza configurata
+        env:
+          INSTANCE_IP: ${{ secrets.OCI_INSTANCE_IP }}
+          SSH_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "-" ]; then
+            echo "Nessuna istanza configurata: prossimo retry automatico."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/oci_instance_key
+          chmod 600 ~/.ssh/oci_instance_key
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i ~/.ssh/oci_instance_key "ubuntu@$INSTANCE_IP" \
+            "echo 'alive at $(date -u)' && pgrep -f run_master.py >/dev/null && echo 'bot: running' || echo 'bot: stopped'" \
+            2>&1 || echo "Istanza non raggiungibile"

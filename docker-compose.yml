@@ -1,0 +1,39 @@
+# ==========================================================================
+# SMC Trading Bot - Docker MT5 (SOLO host x86_64)
+# ==========================================================================
+# Avvia MetaTrader 5 dentro Wine su Linux con gmag11/MetaTrader5-Docker.
+#
+# ⚠️ ATTENZIONE: l'immagine gmag11/metatrader5-docker e' disponibile SOLO
+#    per amd64. Su Oracle Cloud Ampere (ARM64/A1.Flex) NON funziona:
+#    deploy.sh rileva l'architettura e usa automaticamente Hangover
+#    (Wine per ARM64) invece di Docker. Questo file serve quindi solo per
+#    host x86_64 (o istanze Intel OCI) e per uso manuale di debug.
+#
+# Avvio:
+#   docker-compose up -d
+#   docker-compose logs -f   (per vedere i log)
+#   docker-compose down       (per fermare)
+# ==========================================================================
+
+version: "3.8"
+
+services:
+  mt5:
+    image: gmag11/metatrader5-docker:latest
+    container_name: mt5_bot
+    restart: unless-stopped
+    ports:
+      - "5900:5900"    # VNC (monitora MT5 da remoto, opzionale)
+      - "18812:18812"  # mt5linux bridge (il bot Python si connette qui)
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:-changeme}    # Password VNC
+      - MT5_LOGIN=${MT5_LOGIN}                     # Login conto MT5
+      - MT5_PASSWORD=${MT5_PASSWORD}               # Password MT5
+      - MT5_SERVER=${MT5_SERVER}                   # Server (es. MetaQuotes-Demo)
+    volumes:
+      - mt5_data:/root/.wine/drive_c/Program Files/MetaTrader 5
+      - ./Experts:/root/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts
+    shm_size: "2gb"
+
+volumes:
+  mt5_data:
