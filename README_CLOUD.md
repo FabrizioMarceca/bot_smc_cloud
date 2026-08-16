@@ -57,7 +57,7 @@ Il codice vive nel repo GitHub **`bot_smc_cloud`** (questo repo): sulla VM basta
 clonarlo, cosi' il deploy e' sempre allineato all'ultima versione:
 ```bash
 cd ~
-git clone https://github.com/Giovanni27032007/bot_smc_cloud.git bot_smc
+git clone https://github.com/FabrizioMarceca/bot_smc_cloud.git bot_smc
 cd bot_smc
 ```
 

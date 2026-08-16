@@ -107,7 +107,7 @@ Se l'istanza è stata creata a mano, puoi deployare direttamente da SSH:
 
 ```bash
 cd ~
-git clone https://github.com/Giovanni27032007/bot_smc_cloud.git bot_smc
+git clone https://github.com/FabrizioMarceca/bot_smc_cloud.git bot_smc
 cd bot_smc
 nano .env            # inserisci MT5 + Telegram + webhook
 chmod +x deploy.sh
@@ -217,7 +217,7 @@ Crea questi secret:
 | `OCI_SUBNET_ID` | OCID della subnet pubblica di Francoforte |
 | `OCI_SSH_PUBLIC_KEY` | contenuto di `oci_francoforte.pub` |
 | `OCI_SSH_PRIVATE_KEY` | contenuto di `oci_francoforte` (chiave privata) |
-| `BOT_REPO_URL` | `https://github.com/Giovanni27032007/bot_smc_cloud.git` |
+| `BOT_REPO_URL` | `https://github.com/FabrizioMarceca/bot_smc_cloud.git` |
 | `MT5_LOGIN` | login conto MT5 |
 | `MT5_PASSWORD` | password MT5 |
 | `MT5_SERVER` | server MT5 (es. `MetaQuotes-Demo`) |
