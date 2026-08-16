@@ -14,3 +14,6 @@ bot_log*.txt
 ngrok.exe
 .freebuff/
 documentazione_strategia/
+oci_francoforte
+oci_francoforte.pub
+oci_api_key.pem

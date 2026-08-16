@@ -3,7 +3,9 @@
 # =============================================================================
 # Prova solo regioni gia' sottoscritte e subnet pubbliche gia' esistenti.
 # Non cambia la Home Region, non sottoscrive nuove regioni e non fa upgrade PAYG.
-# La Home Region viene preferita per compatibilita' con Always Free ARM.
+# La regione target preferita e' eu-frankfurt-1 (Germany Central - Francoforte),
+# forzata come prima candidata dal sorting in 'Scoperta regioni'. Se lì non c'è
+# capacità ARM, si ripiega sulle altre regioni READY come rete di sicurezza.
 # =============================================================================
 
 name: OCI ARM Host Capacity
