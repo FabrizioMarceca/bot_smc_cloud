@@ -215,6 +215,14 @@ jobs:
                           "--region", region,
                           "--all",
                       ]).get("data", [])
+                      print(f"DEBUG {region}: subnet trovate={len(subnets)}")
+                      for s in subnets:
+                          print(
+                              "  subnet", str(s.get("id", ""))[-20:],
+                              "state=" + str(s.get("lifecycle-state")),
+                              "pubblica=" + str(not s.get("prohibit-public-ip-on-vnic", True)),
+                              "route_ok=" + str(has_internet_route(s, region)),
+                          )
                       subnet_ids = [
                           str(subnet["id"])
                           for subnet in subnets
@@ -238,6 +246,7 @@ jobs:
               sys.exit(1)
 
           print("Candidati ordinati:", " | ".join(candidates))
+          print("Regioni READY:", ", ".join(x["name"] for x in ready) or "nessuna")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"region_candidates={'|'.join(candidates)}\n")
           PYEOF
