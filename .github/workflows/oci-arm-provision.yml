@@ -65,6 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.oci ~/.ssh
+          # Rimuove spazi/a-capo accidentali incollati nei secret (causa comune
+          # di fallimenti: un OCID con \n finale invalida la chiamata API).
+          OCI_USER="$(printf '%s' "${OCI_USER}" | tr -d ' \n')"
+          OCI_FP="$(printf '%s' "${OCI_FP}" | tr -d ' \n')"
+          OCI_TENANCY="$(printf '%s' "${OCI_TENANCY}" | tr -d ' \n')"
+          OCI_REGION="$(printf '%s' "${OCI_REGION}" | tr -d ' \n')"
           {
             echo "[DEFAULT]"
             echo "user=${OCI_USER}"
@@ -94,8 +100,8 @@ jobs:
           import sys
           import time
 
-          tenancy = os.environ["OCI_TENANCY"]
-          compartment = os.environ["COMPARTMENT_ID"]
+          tenancy = os.environ.get("OCI_TENANCY", "").strip()
+          compartment = os.environ.get("COMPARTMENT_ID", "").strip()
           preferred_region = os.environ.get("PREFERRED_REGION", "").strip()
           preferred_subnet = os.environ.get("PREFERRED_SUBNET", "").strip()
 
@@ -108,11 +114,16 @@ jobs:
                   raise TimeoutError("discovery regioni oltre 90 secondi")
               result = subprocess.run(
                   ["oci", *args, "--output", "json"],
-                  check=True,
+                  check=False,
                   capture_output=True,
                   text=True,
                   timeout=min(timeout, max(1, int(remaining))),
               )
+              if result.returncode != 0:
+                  error = (result.stderr or result.stdout or "").strip()[:2000]
+                  raise RuntimeError(
+                      f"OCI comando fallito ({result.returncode}): {error}"
+                  )
               return json.loads(result.stdout or "{}")
 
           def has_internet_route(subnet: dict, region: str) -> bool:
